@@ -9,6 +9,7 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -49,6 +50,7 @@ class GeometryDashPanel extends JPanel {
     private final Player player;
     private final List<Spike> spikes;
     private final List<Orb> orbs;
+    private final List<Platform> platforms;
     private final Random random;
 
     private boolean running;
@@ -65,6 +67,7 @@ class GeometryDashPanel extends JPanel {
         this.player = new Player(PLAYER_X, GROUND_Y - PLAYER_SIZE, PLAYER_SIZE);
         this.spikes = new ArrayList<>();
         this.orbs = new ArrayList<>();
+        this.platforms = new ArrayList<>();
         this.random = new Random();
 
         resetRun();
@@ -104,6 +107,7 @@ class GeometryDashPanel extends JPanel {
         player.reset(PLAYER_X, GROUND_Y - PLAYER_SIZE);
         spikes.clear();
         orbs.clear();
+        platforms.clear();
         gameOver = false;
         score = 0;
         distanceCounter = 0;
@@ -132,8 +136,10 @@ class GeometryDashPanel extends JPanel {
     }
 
     private Orb getTouchedOrb() {
+        Rectangle playerBounds = player.getBounds();
         for (Orb orb : orbs) {
-            if (!orb.used && player.intersects(orb.x, orb.y, orb.size, orb.size)) {
+            Rectangle orbBounds = new Rectangle(orb.x, orb.y, orb.size, orb.size);
+            if (!orb.used && playerBounds.intersects(orbBounds)) {
                 return orb;
             }
         }
@@ -145,16 +151,45 @@ class GeometryDashPanel extends JPanel {
             return;
         }
 
-        player.applyPhysics(GRAVITY, GROUND_Y);
+        player.beginFrame();
+        for (Spike spike : spikes) {
+            spike.beginFrame();
+        }
+        for (Platform platform : platforms) {
+            platform.beginFrame();
+        }
+
+        player.applyGravity(GRAVITY);
 
         spawnObstacles();
         moveWorld();
+        resolvePlayerLanding();
         cleanupObjects();
 
-        if (checkCollision()) {
+        if (checkHazardCollision()) {
             running = false;
             gameOver = true;
             bestScore = Math.max(bestScore, score);
+        }
+    }
+
+    private void resolvePlayerLanding() {
+        player.resolveGroundCollision(GROUND_Y);
+
+        Rectangle current = player.getBounds();
+        Rectangle previous = player.getPreviousBounds();
+
+        for (Platform platform : platforms) {
+            Rectangle platformBounds = platform.getBounds();
+            boolean crossedPlatformTop = previous.y + previous.height <= platformBounds.y
+                    && current.y + current.height >= platformBounds.y;
+            boolean horizontallyOverlapping = current.x + current.width > platformBounds.x
+                    && current.x < platformBounds.x + platformBounds.width;
+
+            if (crossedPlatformTop && horizontallyOverlapping) {
+                player.landOn(platformBounds.y);
+                current = player.getBounds();
+            }
         }
     }
 
@@ -176,10 +211,17 @@ class GeometryDashPanel extends JPanel {
                 spikes.add(new Spike(startX + i * 46, GROUND_Y - height, 38, height));
             }
 
-            if (random.nextDouble() < 0.35) {
+            if (random.nextDouble() < 0.4) {
                 int orbX = startX + 40;
                 int orbY = GROUND_Y - 120 - random.nextInt(90);
                 orbs.add(new Orb(orbX, orbY, 22));
+            }
+
+            if (random.nextDouble() < 0.35) {
+                int platformX = WIDTH + 120;
+                int platformY = GROUND_Y - (95 + random.nextInt(65));
+                int platformWidth = 120 + random.nextInt(80);
+                platforms.add(new Platform(platformX, platformY, platformWidth, 16));
             }
         }
     }
@@ -195,12 +237,17 @@ class GeometryDashPanel extends JPanel {
             orb.x -= speed;
         }
 
+        for (Platform platform : platforms) {
+            platform.x -= speed;
+        }
+
         distanceCounter += speed;
         score = distanceCounter;
     }
 
     private void cleanupObjects() {
         spikes.removeIf(spike -> spike.x + spike.width < -20);
+        platforms.removeIf(platform -> platform.x + platform.width < -20);
 
         Iterator<Orb> iterator = orbs.iterator();
         while (iterator.hasNext()) {
@@ -211,13 +258,29 @@ class GeometryDashPanel extends JPanel {
         }
     }
 
-    private boolean checkCollision() {
+    private boolean checkHazardCollision() {
+        Rectangle playerBounds = player.getBounds();
+        Rectangle previousPlayerBounds = player.getPreviousBounds();
+
         for (Spike spike : spikes) {
-            if (player.intersects(spike.x + 4, spike.y + 3, spike.width - 8, spike.height - 3)) {
+            Rectangle currentSpikeBounds = spike.getBounds();
+            Rectangle previousSpikeBounds = spike.getPreviousBounds();
+            Rectangle sweptPlayer = unionRect(playerBounds, previousPlayerBounds);
+            Rectangle sweptSpike = unionRect(currentSpikeBounds, previousSpikeBounds);
+
+            if (sweptPlayer.intersects(sweptSpike)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private Rectangle unionRect(Rectangle a, Rectangle b) {
+        int left = Math.min(a.x, b.x);
+        int top = Math.min(a.y, b.y);
+        int right = Math.max(a.x + a.width, b.x + b.width);
+        int bottom = Math.max(a.y + a.height, b.y + b.height);
+        return new Rectangle(left, top, right - left, bottom - top);
     }
 
     @Override
@@ -267,6 +330,10 @@ class GeometryDashPanel extends JPanel {
     private void drawObjects(Graphics2D g2) {
         player.draw(g2);
 
+        for (Platform platform : platforms) {
+            platform.draw(g2);
+        }
+
         for (Spike spike : spikes) {
             spike.draw(g2);
         }
@@ -306,6 +373,7 @@ class Player {
     private double velocityY;
     private double rotation;
     private boolean grounded;
+    private double previousY;
 
     Player(double x, double y, int size) {
         this.x = x;
@@ -314,6 +382,7 @@ class Player {
         this.velocityY = 0;
         this.rotation = 0;
         this.grounded = true;
+        this.previousY = y;
     }
 
     void reset(double newX, double newY) {
@@ -322,21 +391,34 @@ class Player {
         this.velocityY = 0;
         this.rotation = 0;
         this.grounded = true;
+        this.previousY = newY;
     }
 
-    void applyPhysics(double gravity, int groundY) {
+    void beginFrame() {
+        previousY = y;
+    }
+
+    void applyGravity(double gravity) {
         velocityY += gravity;
         y += velocityY;
 
-        if (y + size >= groundY) {
-            y = groundY - size;
-            velocityY = 0;
-            grounded = true;
-            rotation = 0;
-        } else {
-            grounded = false;
+        grounded = false;
+        if (velocityY != 0) {
             rotation += 8;
         }
+    }
+
+    void resolveGroundCollision(int groundY) {
+        if (y + size >= groundY) {
+            landOn(groundY);
+        }
+    }
+
+    void landOn(int surfaceY) {
+        y = surfaceY - size;
+        velocityY = 0;
+        grounded = true;
+        rotation = 0;
     }
 
     void forceJump(double jumpForce) {
@@ -348,8 +430,12 @@ class Player {
         return grounded;
     }
 
-    boolean intersects(int ox, int oy, int ow, int oh) {
-        return x < ox + ow && x + size > ox && y < oy + oh && y + size > oy;
+    Rectangle getBounds() {
+        return new Rectangle((int) Math.round(x), (int) Math.round(y), size, size);
+    }
+
+    Rectangle getPreviousBounds() {
+        return new Rectangle((int) Math.round(x), (int) Math.round(previousY), size, size);
     }
 
     void draw(Graphics2D g2) {
@@ -379,12 +465,26 @@ class Spike {
     final int y;
     final int width;
     final int height;
+    private int previousX;
 
     Spike(int x, int y, int width, int height) {
         this.x = x;
         this.y = y;
         this.width = width;
         this.height = height;
+        this.previousX = x;
+    }
+
+    void beginFrame() {
+        previousX = x;
+    }
+
+    Rectangle getBounds() {
+        return new Rectangle(x, y, width, height);
+    }
+
+    Rectangle getPreviousBounds() {
+        return new Rectangle(previousX, y, width, height);
     }
 
     void draw(Graphics2D g2) {
@@ -396,6 +496,42 @@ class Spike {
 
         g2.setColor(new Color(180, 40, 40));
         g2.drawPolygon(px, py, 3);
+    }
+}
+
+class Platform {
+    int x;
+    final int y;
+    final int width;
+    final int height;
+    private int previousX;
+
+    Platform(int x, int y, int width, int height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.previousX = x;
+    }
+
+    void beginFrame() {
+        previousX = x;
+    }
+
+    Rectangle getBounds() {
+        return new Rectangle(x, y, width, height);
+    }
+
+    Rectangle getPreviousBounds() {
+        return new Rectangle(previousX, y, width, height);
+    }
+
+    void draw(Graphics2D g2) {
+        g2.setColor(new Color(110, 230, 255));
+        g2.fillRoundRect(x, y, width, height, 10, 10);
+
+        g2.setColor(new Color(70, 170, 210));
+        g2.drawRoundRect(x, y, width, height, 10, 10);
     }
 }
 
