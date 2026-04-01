@@ -138,14 +138,14 @@ class GeometryDashPanel extends JPanel {
         }
 
         Orb hitOrb = getTouchedOrb();
-        if (hitOrb != null) {
-            player.forceJump(JUMP_FORCE * 0.85);
+        if (hitOrb != null && player.canJump()) {
+            player.jump(JUMP_FORCE * 0.85);
             hitOrb.used = true;
             return;
         }
 
-        if (player.onGround()) {
-            player.forceJump(JUMP_FORCE);
+        if (player.canJump()) {
+            player.jump(JUMP_FORCE);
         }
     }
 
@@ -399,6 +399,8 @@ class GeometryDashPanel extends JPanel {
 }
 
 class Player {
+    private static final int MAX_JUMPS = 2;
+
     private double x;
     private double y;
     private final int size;
@@ -406,6 +408,7 @@ class Player {
     private double rotation;
     private boolean grounded;
     private double previousY;
+    private int jumpsUsed;
 
     Player(double x, double y, int size) {
         this.x = x;
@@ -415,6 +418,7 @@ class Player {
         this.rotation = 0;
         this.grounded = true;
         this.previousY = y;
+        this.jumpsUsed = 0;
     }
 
     void reset(double newX, double newY) {
@@ -424,6 +428,7 @@ class Player {
         this.rotation = 0;
         this.grounded = true;
         this.previousY = newY;
+        this.jumpsUsed = 0;
     }
 
     void beginFrame() {
@@ -451,11 +456,21 @@ class Player {
         velocityY = 0;
         grounded = true;
         rotation = 0;
+        jumpsUsed = 0;
     }
 
-    void forceJump(double jumpForce) {
+    void jump(double jumpForce) {
+        if (!canJump()) {
+            return;
+        }
+
         velocityY = jumpForce;
         grounded = false;
+        jumpsUsed++;
+    }
+
+    boolean canJump() {
+        return jumpsUsed < MAX_JUMPS;
     }
 
     boolean onGround() {
