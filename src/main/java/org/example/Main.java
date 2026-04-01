@@ -45,6 +45,8 @@ class GeometryDashPanel extends JPanel {
     private static final double GRAVITY = 0.72;
     private static final double JUMP_FORCE = -14.8;
     private static final int BASE_SCROLL_SPEED = 7;
+    private static final int MAX_SPEED_BONUS = 6;
+    private static final int DIFFICULTY_SCORE_CAP = 6000;
 
     private static final int FRAME_TIME_MS = 16;
 
@@ -217,15 +219,18 @@ class GeometryDashPanel extends JPanel {
         }
 
         Spike lastSpike = spikes.get(spikes.size() - 1);
-        int gap = 150 + random.nextInt(220);
+        double difficulty = getDifficultyFactor();
+        int minGap = lerpInt(190, 130, difficulty);
+        int maxGap = lerpInt(410, 230, difficulty);
+        int gap = minGap + random.nextInt(maxGap - minGap + 1);
         if (lastSpike.x >= WIDTH - gap) {
             return;
         }
 
         int startX = WIDTH + 80;
-        spawnSpikeGroup(startX);
-        maybeSpawnOrb(startX);
-        maybeSpawnPlatform();
+        spawnSpikeGroup(startX, difficulty);
+        maybeSpawnOrb(startX, difficulty);
+        maybeSpawnPlatform(difficulty);
     }
 
     private void addInitialSpike() {
@@ -234,24 +239,27 @@ class GeometryDashPanel extends JPanel {
         spikes.add(new Spike(x, GROUND_Y - height, 38, height));
     }
 
-    private void spawnSpikeGroup(int startX) {
-        int count = random.nextDouble() < 0.3 ? 2 : 1;
+    private void spawnSpikeGroup(int startX, double difficulty) {
+        double doubleSpikeChance = 0.25 + (0.2 * difficulty);
+        int count = random.nextDouble() < doubleSpikeChance ? 2 : 1;
         for (int i = 0; i < count; i++) {
             int height = 35 + random.nextInt(45);
             spikes.add(new Spike(startX + i * 46, GROUND_Y - height, 38, height));
         }
     }
 
-    private void maybeSpawnOrb(int startX) {
-        if (random.nextDouble() < 0.4) {
+    private void maybeSpawnOrb(int startX, double difficulty) {
+        double orbChance = 0.45 - (0.2 * difficulty);
+        if (random.nextDouble() < orbChance) {
             int orbX = startX + 40;
             int orbY = GROUND_Y - 120 - random.nextInt(90);
             orbs.add(new Orb(orbX, orbY, 22));
         }
     }
 
-    private void maybeSpawnPlatform() {
-        if (random.nextDouble() < 0.35) {
+    private void maybeSpawnPlatform(double difficulty) {
+        double platformChance = 0.4 - (0.22 * difficulty);
+        if (random.nextDouble() < platformChance) {
             int platformX = WIDTH + 120;
             int platformY = GROUND_Y - (95 + random.nextInt(65));
             int platformWidth = 120 + random.nextInt(80);
@@ -260,7 +268,8 @@ class GeometryDashPanel extends JPanel {
     }
 
     private void moveWorld() {
-        int speed = BASE_SCROLL_SPEED + Math.min(5, score / 800);
+        double difficulty = getDifficultyFactor();
+        int speed = BASE_SCROLL_SPEED + (int) Math.round(MAX_SPEED_BONUS * difficulty);
 
         for (Spike spike : spikes) {
             spike.x -= speed;
@@ -274,6 +283,14 @@ class GeometryDashPanel extends JPanel {
 
         distanceCounter += speed;
         score = distanceCounter;
+    }
+
+    private double getDifficultyFactor() {
+        return Math.min(1.0, score / (double) DIFFICULTY_SCORE_CAP);
+    }
+
+    private int lerpInt(int start, int end, double t) {
+        return (int) Math.round(start + (end - start) * t);
     }
 
     private void cleanupOffscreenObjects() {
